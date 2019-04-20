@@ -20,7 +20,8 @@ This uses pyVmomi to interact with vCenter and the native REST API to interact w
 
 ## Design
 
-TBC
+When deployed with the default config.ini to a 'vGhetto Lab Deployment' the NALD will build the following topology:
+![Design](/design.png?raw=true)
 
 ## Configuration
 
