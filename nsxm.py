@@ -169,9 +169,9 @@ class Nsx():
 
     def get_json_api_data(self, api_url):
         full_url = 'https://' + self.nsx_host + api_url
-        api_data = self.nsx_return_json(full_url)
+        response = self.nsx_return_json(full_url)
 
-        return api_data
+        return response
 
     def nsx_post_xml(self, api_url, data):
         url = 'https://' + self.nsx_host + api_url
@@ -243,97 +243,84 @@ class Nsx():
         return ip_pool_id
 
     def configure_vxlan(self, ip_pool_id):
-        data = '<nwFabricFeatureConfig>\n\
-                <featureId>com.vmware.vshield.vsm.vxlan</featureId>\n\
-                <resourceConfig>\n\
-                <resourceId>{0}</resourceId>\n\
-                <configSpec class="clusterMappingSpec">\n\
-                <switch>\n\
-                <objectId>{1}</objectId>\n\
-                </switch>\n\
-                <vlanId>0</vlanId>\n\
-                <vmknicCount>1</vmknicCount>\n\
-                <ipPoolId>{2}</ipPoolId>\n\
-                </configSpec>\n\
-                </resourceConfig>\n\
-                <resourceConfig>\n\
-                    <resourceId>{1}</resourceId>\n\
-                    <configSpec class="vdsContext">\n\
-                        <switch>\n\
-                            <objectId>{1}</objectId>\n\
-                        </switch>\n\
-                        <mtu>1600</mtu>\n\
-                        <teaming>FAILOVER_ORDER</teaming>\n\
-                    </configSpec>\n\
-                </resourceConfig>\n\
-                </nwFabricFeatureConfig>'.format(self.cluster_id,
-                                                 self.dvs_id,
-                                                 ip_pool_id)
-        api_data = self.nsx_post_xml('/api/2.0/nwfabric/configure',
-                                     data)
-        return api_data
+        vxlan_config = {"featureId": "com.vmware.vshield.vsm.vxlan",
+                        "resourceConfigs": [
+                            {
+                                "resourceId": self.cluster_id,
+                                "configSpec": {
+                                    "class": "clusterMappingSpec",
+                                    "switchObj": {
+                                        "objectId": self.dvs_id
+                                    },
+                                    "vlan": "0",
+                                    "vmknicCount": "1",
+                                    "ipPoolId": ip_pool_id
+                                }
+                            },
+                            {
+                                "resourceId": self.dvs_id,
+                                "configSpec": {
+                                    "class": "vdsContext",
+                                    "switchObj": {
+                                        "objectId": self.dvs_id
+                                    },
+                                    "mtu": "1600",
+                                    "teaming": "FAILOVER_ORDER"
+                                }
+                            }
+                        ]
+                        }
+
+        return self.nsx_send_json('/api/2.0/nwfabric/configure',
+                                  json.dumps(vxlan_config))
 
     def create_segment_id(self, range_start, range_end):
-        data = "<segmentRange>\n\
-                    <name>MC Segment</name>\n\
-                    <desc>Segment ID Range 1</desc>\n\
-                    <begin>{}</begin>\n\
-                    <end>{}</end>\n\
-                </segmentRange>".format(range_start, range_end)
+        segment_id = {'name': 'NALD Segment',
+                      'begin': range_start,
+                      'end': range_end
+                      }
 
-        api_data = self.nsx_post_xml('/api/2.0/vdn/config/segments',
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/2.0/vdn/config/segments',
+                                  json.dumps(segment_id))
 
     def create_transport_zone(self):
-        data = "<vdnScope>\n\
-                <name>MC-Transport-Zone</name>\n\
-                <clusters>\n\
-                    <cluster>\n\
-                        <cluster>\n\
-                            <objectId>{}</objectId>\n\
-                        </cluster>\n\
-                    </cluster>\n\
-                </clusters>\n\
-                <controlPlaneMode>UNICAST_MODE</controlPlaneMode>\n\
-                </vdnScope>".format(self.cluster_id)
+        transport_zone = {
+                          'name': 'NALD-Transport-Zone',
+                          'clusters': {
+                            'clusters': [
+                              {
+                                'cluster': {
+                                  'objectId': self.cluster_id
+                                }
+                              }
+                            ]
+                          },
+                          'controlPlaneMode': 'UNICAST_MODE'
+                        }
 
-        api_data = self.nsx_post_xml('/api/2.0/vdn/scopes',
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/2.0/vdn/scopes',
+                                  json.dumps(transport_zone))
 
     def get_transport_zones(self):
-        api_data = self.get_json_api_data('/api/2.0/vdn/scopes')
-        return api_data
+        return self.get_json_api_data('/api/2.0/vdn/scopes')
 
     def deploy_controller(self, name, ip_pool_id):
-        data = "<controllerSpec>\n\
-                    <name>{}</name>\n\
-                    <description>NSX-Controller</description>\n\
-                    <ipPoolId>{}</ipPoolId>\n\
-                    <resourcePoolId>{}</resourcePoolId>\n\
-                    <datastoreId>{}</datastoreId>\n\
-                    <deployType>medium</deployType>\n\
-                    <networkId>{}</networkId>\n\
-                    <password>{}</password>\n\
-                </controllerSpec>".format(name,
-                                          ip_pool_id,
-                                          self.cluster_id,
-                                          self.datastore_id,
-                                          self.vm_network_id,
-                                          self.infra_password)
+        controller = {"name": name,
+                      "ipPoolId": ip_pool_id,
+                      "resourcePoolId": self.cluster_id,
+                      "datastoreId": self.datastore_id,
+                      "networkId": self.vm_network_id,
+                      "password": self.infra_password
+                      }
 
-        api_data = self.nsx_post_xml('/api/2.0/vdn/controller',
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/2.0/vdn/controller',
+                                  json.dumps(controller))
 
     def get_controller_job_status(self, job_id):
-        api_data = self.get_json_api_data('/api/2.0/vdn/controller/progress/{}'.format(job_id))
-        return api_data
+        return self.get_json_api_data('/api/2.0/vdn/controller/progress/{}'.format(job_id))
 
     def get_logical_switches(self):
-        api_data = self.get_json_api_data('/api/2.0/vdn/virtualwires')
-        return api_data
+        return self.get_json_api_data('/api/2.0/vdn/virtualwires')
 
     def get_logical_switch(self, name):
         for switch in self.get_logical_switches()['dataPage']['data']:
@@ -341,21 +328,18 @@ class Nsx():
                 return switch['objectId']
 
     def create_logical_switch(self, ls_name, transport_zone_id, ls_desc=''):
-        data = "<virtualWireCreateSpec>\n\
-                    <name>{}</name>\n\
-                    <description>{}</description>\n\
-                    <tenantId>virtual wire tenant</tenantId>\n\
-                    <controlPlaneMode>UNICAST_MODE</controlPlaneMode>\n\
-                    <guestVlanAllowed>false</guestVlanAllowed>\n\
-                </virtualWireCreateSpec>".format(ls_name, ls_desc)
+        logical_switch = {'name': ls_name,
+                          'description': ls_desc,
+                          'tenantId': 'virtual wire tenant',
+                          'controlPlaneMode': 'UNICAST_MODE'
+                          }
 
-        api_data = self.nsx_post_xml('/api/2.0/vdn/scopes/{}/virtualwires'.format(transport_zone_id),
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/2.0/vdn/scopes/{}/virtualwires'.format(transport_zone_id),
+                                  json.dumps(logical_switch))
 
     def create_quick_logical_switch(self, ls_name):
         transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
-        print(nsx.create_logical_switch(ls_name, transport_zone_id))
+        print(self.create_logical_switch(ls_name, transport_zone_id))
 
     def deploy_dlr(self):
         dlr_ha_mgmt_ls = self.get_logical_switch('DLR-HA')
@@ -488,8 +472,7 @@ class Nsx():
         return api_data
 
     def get_edges(self):
-        api_data = self.get_json_api_data('/api/4.0/edges')
-        return api_data
+        return self.get_json_api_data('/api/4.0/edges')
 
     def get_edge(self, name):
         for edge in self.get_edges()['edgePage']['data']:
@@ -497,8 +480,7 @@ class Nsx():
                 return edge['objectId']
 
     def get_edge_config(self, edge_id):
-        api_data = self.get_json_api_data('/api/4.0/edges/{}'.format(edge_id))
-        return api_data
+        return self.get_json_api_data('/api/4.0/edges/{}'.format(edge_id))
 
     def remove_config_versions(self, config):
         # Removes the 'version' entries from an Edge's config to
@@ -570,8 +552,12 @@ class Nsx():
                                  json_new_config,
                                  'PUT'))
 
+    def get_host_comm_status(self, host_id):
+        return self.get_json_api_data('/api/2.0/vdn/inventory/host/{}/connection/status'.format(host_id))
+
 
 vc = Vcenter()
 nsx = Nsx(vc)
 
 print(nsx.get_nsx_info())
+nsx.deploy()
