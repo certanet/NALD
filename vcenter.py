@@ -96,6 +96,15 @@ class Vcenter():
         print(dvpg_obj)
         # task = dvpg_obj.Rename('Edge')
 
+    def list_hosts_in_cluster(self, cluster_id):
+        hosts = []
+        datacenter = self.get_datacenter()
+        for entity in datacenter.hostFolder.childEntity:
+            if entity._moId == cluster_id:
+                for host in entity.host:
+                    hosts.append(host)
+        return hosts
+
 
 def main():
     vc = Vcenter()
