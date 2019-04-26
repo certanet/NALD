@@ -46,11 +46,6 @@ class Nsx():
         self.nsx_setup()
 
     def deploy(self):
-        prep_job = self.nsx_host_prep('set')
-        print(self.get_job_status(prep_job))
-
-        print(self.create_transport_zone())
-
         print(self.create_ip_pool('VTEP_POOL',
                                   config['NSX']['VTEP_POOL_START'],
                                   config['NSX']['VTEP_POOL_END'],
@@ -69,12 +64,50 @@ class Nsx():
         controller_ip_pool_id = self.get_ip_pool_id_by_name('CONTROLLER_POOL')
 
         print(self.configure_vxlan(vtep_ip_pool_id))
+        sleep(10)
 
-        transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
+        status, hp, rabbit, fw = False, False, False, False
+        while not status:
+            prep_status = self.get_host_prep_status()
+            for feature in prep_status['statuses'][0]['featureStatuses']:
+                if feature['featureId'] == 'com.vmware.vshield.vsm.nwfabric.hostPrep':
+                    if feature['status'] == 'GREEN':
+                        hp = True
+                    else:
+                        print(feature['status'], end='/')
+                elif feature['featureId'] == 'com.vmware.vshield.vsm.messagingInfra':
+                    if feature['status'] == 'GREEN':
+                        rabbit = True
+                    else:
+                        print(feature['status'], end='/')
+                elif feature['featureId'] == 'com.vmware.vshield.firewall':
+                    if feature['status'] == 'GREEN':
+                        fw = True
+                    else:
+                        print(feature['status'])
+                        sleep(5)
+            if hp and rabbit and fw:
+                status = True
+
+        ready_hosts = 0
+        num_hosts = len(self.vcenter.list_hosts_in_cluster(self.cluster_id))
+        while ready_hosts < num_hosts:
+            for host in self.vcenter.list_hosts_in_cluster(self.cluster_id):
+                comm_status = self.get_host_comm_status(host._moId)
+                if comm_status['nsxMgrToControlPlaneAgentConn'] == 'UP':
+                    ready_hosts += 1
+                else:
+                    print('Host: {} Status: {}'.format(host,
+                                                       comm_status['nsxMgrToControlPlaneAgentConn']))
+                    sleep(5)
+
+        transport_zone_id = self.create_transport_zone()
+        print(transport_zone_id)
+        # transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
 
         no_controllers = 1
         for x in range(1, (no_controllers + 1)):
-            controller_name = '{}0{}'.format(config['NSX']['CONTROLLER_PREFIX'],x)
+            controller_name = '{}0{}'.format(config['NSX']['CONTROLLER_PREFIX'], x)
 
             controller = self.deploy_controller(controller_name,
                                                 controller_ip_pool_id)
@@ -172,55 +205,32 @@ class Nsx():
         return response
 
     def get_nsx_info(self):
-        api_data = self.get_json_api_data('/api/1.0/appliance-management/global/info')
-        return api_data
+        return self.get_json_api_data('/api/1.0/appliance-management/global/info')
 
-    def nsx_host_prep(self, get_set='get'):
-        if get_set == 'get':
-            api_data = self.get_json_api_data('/api/2.0/nwfabric/status?resource={}'.format(self.cluster_id))
-        elif get_set == 'set':
-            data = "<nwFabricFeatureConfig>\n\
-                        <resourceConfig>\n\
-                            <resourceId>{}</resourceId>\n\
-                        </resourceConfig>\n\
-                    </nwFabricFeatureConfig>".format(self.cluster_id)
-            api_data = self.nsx_post_xml('/api/2.0/nwfabric/configure',
-                                         data)
-        return api_data
+    def get_host_prep_status(self):
+        return self.get_json_api_data('/api/2.0/nwfabric/status?resource={}'.format(self.cluster_id))
 
     def get_job_status(self, job_id):
-        api_data = self.get_json_api_data('/api/2.0/services/taskservice/job/{}'.format(job_id))
-        return api_data
+        return self.get_json_api_data('/api/2.0/services/taskservice/job/{}'.format(job_id))
 
     def create_ip_pool(self, name, start, end, prefix, gateway):
-        data = "<ipamAddressPool>\n\
-                    <name>{}</name>\n\
-                    <prefixLength>{}</prefixLength>\n\
-                    <gateway>{}</gateway>\n\
-                    <dnsSuffix>{}</dnsSuffix>\n\
-                    <dnsServer1>{}</dnsServer1>\n\
-                    <dnsServer2></dnsServer2>\n\
-                    <ipRanges>\n\
-                        <ipRangeDto>\n\
-                            <startAddress>{}</startAddress>\n\
-                            <endAddress>{}</endAddress>\n\
-                        </ipRangeDto>\n\
-                    </ipRanges>\n\
-                </ipamAddressPool>".format(name,
-                                           prefix,
-                                           gateway,
-                                           self.dns_domain,
-                                           self.dns_server,
-                                           start,
-                                           end)
+        ip_pool = {'name': name,
+                   'prefixLength': prefix,
+                   'gateway': gateway,
+                   'dnsSuffix': self.dns_domain,
+                   'dnsServer1': self.dns_server,
+                   'ipRanges': [
+                       {'startAddress': start,
+                        'endAddress': end
+                        }
+                        ]
+                   }
 
-        api_data = self.nsx_post_xml('/api/2.0/services/ipam/pools/scope/globalroot-0',
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/2.0/services/ipam/pools/scope/globalroot-0',
+                                  json.dumps(ip_pool))
 
     def get_ip_pools(self):
-        api_data = self.get_json_api_data('/api/2.0/services/ipam/pools/scope/globalroot-0')
-        return api_data
+        return self.get_json_api_data('/api/2.0/services/ipam/pools/scope/globalroot-0')
 
     def get_ip_pool_id_by_name(self, pool_name):
         ip_pool_id = None
