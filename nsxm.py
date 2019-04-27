@@ -46,19 +46,35 @@ class Nsx():
         self.nsx_setup()
 
     def deploy(self):
-        print(self.create_ip_pool('VTEP_POOL',
-                                  config['NSX']['VTEP_POOL_START'],
-                                  config['NSX']['VTEP_POOL_END'],
-                                  config['NSX']['VTEP_POOL_MASK'],
-                                  config['NSX']['VTEP_POOL_GATEWAY']))
-        print(self.create_ip_pool('CONTROLLER_POOL',
-                                  config['NSX']['CONTROLLER_POOL_START'],
-                                  config['NSX']['CONTROLLER_POOL_END'],
-                                  config['NSX']['CONTROLLER_POOL_MASK'],
-                                  config['NSX']['CONTROLLER_POOL_GATEWAY']))
+        VcenterLicense(self.vcenter).apply_nsx_lic()
 
-        print(self.create_segment_id(config['NSX']['SEGMENT_ID_START'],
-                                     config['NSX']['SEGMENT_ID_END']))
+        vc_thumbprint_sha1 = json.loads(self.configure_nsx_vc_sso().text)['details']
+        if json.loads(self.configure_nsx_vc_sso(vc_thumbprint_sha1).text)['status']:
+            print('Configured NSX-VC SSO!')
+
+        vc_thumbprint_sha256 = json.loads(self.configure_nsx_vc_inventory().text)['details']
+        self.configure_nsx_vc_inventory(vc_thumbprint_sha256)
+
+        if self.get_nsx_vc_inventory()['connected']:
+            print('vCenter Inventory is Connected!')
+
+        if self.create_ip_pool('VTEP_POOL',
+                               config['NSX']['VTEP_POOL_START'],
+                               config['NSX']['VTEP_POOL_END'],
+                               config['NSX']['VTEP_POOL_MASK'],
+                               config['NSX']['VTEP_POOL_GATEWAY']).status_code == 201:
+            print('Created VTEP IP Pool!')
+
+        if self.create_ip_pool('CONTROLLER_POOL',
+                               config['NSX']['CONTROLLER_POOL_START'],
+                               config['NSX']['CONTROLLER_POOL_END'],
+                               config['NSX']['CONTROLLER_POOL_MASK'],
+                               config['NSX']['CONTROLLER_POOL_GATEWAY']).status_code == 201:
+            print('Created Controller IP Pool!')
+
+        if self.create_segment_id(config['NSX']['SEGMENT_ID_START'],
+                                     config['NSX']['SEGMENT_ID_END']).status_code == 201:
+            print('Created Segment ID Pool!')
 
         vtep_ip_pool_id = self.get_ip_pool_id_by_name('VTEP_POOL')
         controller_ip_pool_id = self.get_ip_pool_id_by_name('CONTROLLER_POOL')
@@ -193,6 +209,7 @@ class Nsx():
         url = 'https://' + self.nsx_host + api_url
 
         headers = {'Authorization': self.authorizationField,
+                   'Accept': 'application/json',
                    'Content-Type': 'application/json'
                    }
 
@@ -212,6 +229,35 @@ class Nsx():
 
     def get_job_status(self, job_id):
         return self.get_json_api_data('/api/2.0/services/taskservice/job/{}'.format(job_id))
+
+    def configure_nsx_vc_sso(self, vc_thumbprint_sha1=''):
+        sso_lookup_url = 'https://{}:443/lookupservice/sdk'.format(self.vcenter.ip)
+
+        sso_config = {'ssoLookupServiceUrl': sso_lookup_url,
+                      'ssoAdminUsername': self.vcenter.user,
+                      'ssoAdminUserpassword': self.vcenter.password,
+                      'certificateThumbprint': vc_thumbprint_sha1
+                      }
+
+        return self.nsx_send_json('/api/2.0/services/ssoconfig',
+                                  json.dumps(sso_config))
+
+    def get_nsx_vc_sso(self):
+        return self.get_json_api_data('/api/2.0/services/ssoconfig/status')
+
+    def configure_nsx_vc_inventory(self, vc_thumbprint_sha256=''):
+        vc_config = {'ipAddress': self.vcenter.ip,
+                     'userName': self.vcenter.user,
+                     'password': self.vcenter.password,
+                     'certificateThumbprint': vc_thumbprint_sha256
+                     }
+
+        return self.nsx_send_json('/api/2.0/services/vcconfig',
+                                  json.dumps(vc_config),
+                                  'PUT')
+
+    def get_nsx_vc_inventory(self):
+        return self.get_json_api_data('/api/2.0/services/vcconfig/status')
 
     def create_ip_pool(self, name, start, end, prefix, gateway):
         ip_pool = {'name': name,
