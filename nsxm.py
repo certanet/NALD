@@ -28,6 +28,8 @@ class Nsx():
         self.nsx_pass = config['NSX']['PASSWORD']
         self.infra_password = config['NSX']['INFRA_PASSWORD']
 
+        self.num_controllers = config['NSX']['NUM_CONTROLLERS']
+
         self.web_lif_ip = config['NSX']['WEB_LS_LIF']
 
         self.dlr_name = config['NSX']['DLR_NAME']
@@ -122,8 +124,7 @@ class Nsx():
             print('Created Transport Zone!')
         transport_zone_id = transport_zone.text
 
-        no_controllers = 1
-        for x in range(1, (no_controllers + 1)):
+        for x in range(1, (self.num_controllers + 1)):
             controller_name = '{}0{}'.format(config['NSX']['CONTROLLER_PREFIX'], x)
 
             controller = self.deploy_controller(controller_name,
