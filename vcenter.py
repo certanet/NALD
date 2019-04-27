@@ -8,7 +8,7 @@ from pyVmomi import vim
 config = ConfigParser()
 config.read('config.ini')
 
-config_vc =  'VLAB_VCENTER'  # 'VCENTER' / 'VLAB_VCENTER'
+config_vc = 'VCENTER'
 user = config[config_vc]['USER']
 host = config[config_vc]['HOST']
 password = config[config_vc]['PASSWORD']
@@ -16,6 +16,10 @@ password = config[config_vc]['PASSWORD']
 
 class Vcenter():
     def __init__(self):
+        self.ip = config[config_vc]['HOST']
+        self.user = config[config_vc]['USER']
+        self.password = config[config_vc]['PASSWORD']
+
         self.service_instance = SmartConnectNoSSL(host=host,
                                                   user=user,
                                                   pwd=password)

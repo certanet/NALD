@@ -117,16 +117,17 @@ class Nsx():
                                                        comm_status['nsxMgrToControlPlaneAgentConn']))
                     sleep(5)
 
-        transport_zone_id = self.create_transport_zone()
-        print(transport_zone_id)
-        # transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
+        transport_zone = self.create_transport_zone()
+        if transport_zone.status_code == 201:
+            print('Created Transport Zone!')
+        transport_zone_id = transport_zone.text
 
         no_controllers = 1
         for x in range(1, (no_controllers + 1)):
             controller_name = '{}0{}'.format(config['NSX']['CONTROLLER_PREFIX'], x)
 
             controller = self.deploy_controller(controller_name,
-                                                controller_ip_pool_id)
+                                                controller_ip_pool_id).text
             print(self.get_controller_job_status(controller))
 
             while True:
@@ -142,11 +143,12 @@ class Nsx():
                     print(status['vmId'])
                     break
 
-        print(self.create_logical_switch('Transit', transport_zone_id))
-        print(self.create_logical_switch('DLR-HA', transport_zone_id))
-        print(self.create_logical_switch('Web-LS', transport_zone_id))
-        print(self.create_logical_switch('App-LS', transport_zone_id))
-        print(self.create_logical_switch('DB-LS', transport_zone_id))
+        # transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
+        logical_switches = ['Transit', 'DLR-HA', 'Web-LS', 'App-LS', 'DB-LS']
+
+        for ls in logical_switches:
+            if self.create_logical_switch('Transit', transport_zone_id).status_code == 201:
+                print('Created Logical Switch "%s"' % ls)
 
         print(self.deploy_dlr())
         print(self.deploy_esg())
