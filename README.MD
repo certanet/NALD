@@ -46,6 +46,6 @@ NALD assumes that the undelying vSphere infrastructure is deployed in a similar 
 
 ## To Do
 
-- Convert remaining methods (DLR and ESG) to JSON
-- Remove seperate method for edge routing
+- ~~Convert remaining methods (DLR and ESG) to JSON~~
+- ~~Remove seperate method for edge routing~~
 - Add SSL VPN config to ESG

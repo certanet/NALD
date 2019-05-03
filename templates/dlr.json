@@ -1,0 +1,110 @@
+{
+  "datacenterMoid": "{{nsx.datacenter_id}}",
+  "name": "{{nsx.dlr_name}}",
+  "appliances": {
+    "appliances": [
+      {
+        "resourcePoolId": "{{nsx.cluster_id}}",
+        "datastoreId": "{{nsx.datastore_id}}"
+      }
+    ]
+  },
+  "featureConfigs": {
+    "features": [
+      {
+        "featureType": "routing_4.0",
+        "enabled": true,
+        "routingGlobalConfig": {
+          "routerId": "{{nsx.dlr_ctrl_ip}}"
+        },
+        "ospf": {
+          "enabled": true,
+          "protocolAddress": "{{nsx.dlr_ctrl_ip}}",
+          "forwardingAddress": "{{nsx.dlr_fwd_ip}}",
+          "ospfAreas": {
+            "ospfAreas": [
+              {
+                "areaId": "{{nsx.internal_ospf_area}}",
+                "type": "nssa",
+                "authentication": {
+                  "type": "none"
+                }
+              }
+            ]
+          },
+          "ospfInterfaces": {
+            "ospfInterfaces": [
+              {
+                "vnic": 2,
+                "areaId": "{{nsx.internal_ospf_area}}"
+              }
+            ]
+          },
+          "redistribution": {
+            "enabled": true,
+            "rules": {
+              "rules": [
+                {
+                  "id": 0,
+                  "from": {
+                    "ospf": false,
+                    "bgp": false,
+                    "connected": true,
+                    "static": false
+                  },
+                  "action": "permit"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "type": "distributedRouter",
+  "mgmtInterface": {
+    "addressGroups": {
+      "addressGroups": [
+        {
+          "primaryAddress": "169.254.254.1",
+          "subnetMask": "255.255.255.252"
+        }
+      ]
+    },
+    "connectedToId": "{{dlr_ha_mgmt_ls}}"
+  },
+  "interfaces": {
+    "interfaces": [
+      {
+        "name": "Transit-LIF",
+        "addressGroups": {
+          "addressGroups": [
+            {
+              "primaryAddress": "{{nsx.dlr_fwd_ip}}",
+              "subnetMask": "255.255.255.248"
+            }
+          ]
+        },
+        "mtu": 1500,
+        "type": "uplink",
+        "isConnected": true,
+        "connectedToId": "{{transit_ls}}"
+      },
+      {
+        "name": "Web-LIF",
+        "addressGroups": {
+          "addressGroups": [
+            {
+              "primaryAddress": "{{nsx.web_lif_ip}}",
+              "subnetMask": "255.255.255.0"
+            }
+          ]
+        },
+        "mtu": 1500,
+        "type": "internal",
+        "isConnected": true,
+        "connectedToId": "{{web_ls}}"
+      }
+    ]
+  }
+}

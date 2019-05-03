@@ -1,0 +1,103 @@
+{
+  "datacenterMoid": "{{nsx.datacenter_id}}",
+  "name": "{{nsx.esg_name}}",
+  "fqdn": "{{nsx.esg_name}}",
+  "appliances": {
+    "applianceSize": "compact",
+    "appliances": [
+      {
+        "resourcePoolId": "{{nsx.cluster_id}}",
+        "datastoreId": "{{nsx.datastore_id}}"
+      }
+    ]
+  },
+  "vnics": {
+    "vnics": [
+      {
+        "addressGroups": {
+          "addressGroups": [
+            {
+              "primaryAddress": "{{nsx.esg_external_ip}}",
+              "secondaryAddresses": {
+                "type": "secondary_addresses",
+                "ipAddress": [
+                  "{{nsx.esg_secondary_ip}}"
+                ]
+              },
+              "subnetMask": "255.255.255.0"
+            }
+          ]
+        },
+        "label": "External",
+        "type": "uplink",
+        "isConnected": true,
+        "index": 0,
+        "portgroupId": "{{nsx.vm_network_id}}"
+      },
+      {
+        "label": "Transit",
+        "addressGroups": {
+          "addressGroups": [
+            {
+              "primaryAddress": "{{nsx.esg_transit_ip}}",
+              "subnetMask": "255.255.255.248"
+            }
+          ]
+        },
+        "type": "internal",
+        "isConnected": true,
+        "index": 1,
+        "portgroupId": "{{transit_ls}}"
+      }
+    ]
+  },
+  "cliSettings": {
+    "remoteAccess": false,
+    "userName": "admin",
+    "password": "{{nsx.infra_password}}"
+  },
+  "featureConfigs": {
+    "features": [
+      {
+        "featureType": "routing_4.0",
+        "enabled": true,
+        "routingGlobalConfig": {
+          "routerId": "{{nsx.esg_external_ip}}"
+        },
+        "ospf": {
+          "enabled": true,
+          "ospfAreas": {
+            "ospfAreas": [
+              {
+                "areaId": "{{nsx.internal_ospf_area}}",
+                "type": "nssa"
+              },
+              {
+                "areaId": 0,
+                "type": "normal"
+              }
+            ]
+          },
+          "ospfInterfaces": {
+            "ospfInterfaces": [
+              {
+                "vnic": 0,
+                "areaId": 0
+              },
+              {
+                "vnic": 1,
+                "areaId": "{{nsx.internal_ospf_area}}"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "featureType": "firewall_4.0",
+        "defaultPolicy": {
+          "action": "accept"
+        }
+      }
+    ]
+  }
+}

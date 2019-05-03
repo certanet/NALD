@@ -5,6 +5,7 @@ import json
 import requests
 from urllib3.exceptions import InsecureRequestWarning
 from time import sleep
+from jinja2 import Environment, FileSystemLoader
 
 from vcenter import Vcenter, config
 from license import VcenterLicense
@@ -151,16 +152,8 @@ class Nsx():
             if self.create_logical_switch('Transit', transport_zone_id).status_code == 201:
                 print('Created Logical Switch "%s"' % ls)
 
-        print(self.deploy_dlr())
-        print(self.deploy_esg())
-
-        edge_id = self.get_edge(self.esg_name)
-        dlr_id = self.get_edge(self.dlr_name)
-
-        self.config_edge_routing(edge_id)
-        self.config_edge_routing(dlr_id)
-
-        return
+        print(self.deploy_dlr().text)
+        print(self.deploy_esg().text)
 
     def nsx_setup(self):
         context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
@@ -192,21 +185,6 @@ class Nsx():
 
         return response
 
-    def nsx_post_xml(self, api_url, data):
-        url = 'https://' + self.nsx_host + api_url
-
-        headers = {'Authorization': self.authorizationField,
-                   'Content-Type': 'application/xml'
-                   }
-
-        response = requests.request('POST',
-                                    url,
-                                    data=data,
-                                    headers=headers,
-                                    verify=False)
-
-        return response.text
-
     def nsx_send_json(self, api_url, data, method='POST'):
         # Method could be POST/PUT
         url = 'https://' + self.nsx_host + api_url
@@ -232,6 +210,9 @@ class Nsx():
 
     def get_job_status(self, job_id):
         return self.get_json_api_data('/api/2.0/services/taskservice/job/{}'.format(job_id))
+
+    def get_host_comm_status(self, host_id):
+        return self.get_json_api_data('/api/2.0/vdn/inventory/host/{}/connection/status'.format(host_id))
 
     def configure_nsx_vc_sso(self, vc_thumbprint_sha1=''):
         sso_lookup_url = 'https://{}:443/lookupservice/sdk'.format(self.vcenter.ip)
@@ -386,227 +367,34 @@ class Nsx():
         return self.nsx_send_json('/api/2.0/vdn/scopes/{}/virtualwires'.format(transport_zone_id),
                                   json.dumps(logical_switch))
 
-    def create_quick_logical_switch(self, ls_name):
-        transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
-        print(self.create_logical_switch(ls_name, transport_zone_id))
+    def load_jinja_template(self, template_file, vars_dict):
+        jinja_loader = Environment(loader=FileSystemLoader('templates'),
+                                   trim_blocks=True,
+                                   lstrip_blocks=True)
+        template = jinja_loader.get_template(template_file)
+        return template.render(vars_dict)
 
     def deploy_dlr(self):
-        dlr_ha_mgmt_ls = self.get_logical_switch('DLR-HA')
-        transit_ls = self.get_logical_switch('Transit')
-        web_ls = self.get_logical_switch('Web-LS')
-        data = "<edge>\n\
-    <datacenterMoid>{}</datacenterMoid>\n\
-    <name>{}</name>\n\
-    <type>distributedRouter</type>\n\
-    <appliances>\n\
-        <appliance>\n\
-            <resourcePoolId>{}</resourcePoolId>\n\
-            <datastoreId>{}</datastoreId>\n\
-        </appliance>\n\
-    </appliances>\n\
-    <mgmtInterface>\n\
-        <connectedToId>{}</connectedToId>\n\
-        <addressGroups>\n\
-            <addressGroup>\n\
-                <primaryAddress>169.254.254.1</primaryAddress>\n\
-                <subnetMask>255.255.255.252</subnetMask>\n\
-            </addressGroup>\n\
-        </addressGroups>\n\
-    </mgmtInterface>\n\
-    <interfaces>\n\
-        <interface>\n\
-            <type>uplink</type>\n\
-            <name>Transit-LIF</name>\n\
-            <mtu>1500</mtu>\n\
-            <isConnected>true</isConnected>\n\
-            <addressGroups>\n\
-                <addressGroup>\n\
-                    <primaryAddress>{}</primaryAddress>\n\
-                    <subnetMask>255.255.255.248</subnetMask>\n\
-                </addressGroup>\n\
-            </addressGroups>\n\
-            <connectedToId>{}</connectedToId>\n\
-        </interface>\n\
-        <interface>\n\
-            <type>internal</type>\n\
-            <name>Web-LIF</name>\n\
-            <mtu>1500</mtu>\n\
-            <isConnected>true</isConnected>\n\
-            <addressGroups>\n\
-                <addressGroup>\n\
-                    <primaryAddress>{}</primaryAddress>\n\
-                    <subnetMask>255.255.255.0</subnetMask>\n\
-                </addressGroup>\n\
-            </addressGroups>\n\
-            <connectedToId>{}</connectedToId>\n\
-        </interface>\n\
-    </interfaces>\n\
-</edge>".format(self.datacenter_id,
-                self.dlr_name,
-                self.cluster_id,
-                self.datastore_id,
-                dlr_ha_mgmt_ls,
-                self.dlr_fwd_ip,
-                transit_ls,
-                self.web_lif_ip,
-                web_ls)
+        dlr = dict()
+        dlr['nsx'] = self
+        dlr['transit_ls'] = self.get_logical_switch('Transit')
+        dlr['dlr_ha_mgmt_ls'] = self.get_logical_switch('DLR-HA')
+        dlr['web_ls'] = self.get_logical_switch('Web-LS')
 
-        api_data = self.nsx_post_xml('/api/4.0/edges',
-                                     data)
-        return api_data
+        return self.nsx_send_json('/api/4.0/edges',
+                                  self.load_jinja_template('dlr.json', dlr))
 
     def deploy_esg(self):
-        transit_ls = self.get_logical_switch('Transit')
-        data = "<edge>\n\
-    <datacenterMoid>{}</datacenterMoid>\n\
-    <name>{}</name>\n\
-    <fqdn>{}</fqdn>\n\
-    <appliances>\n\
-        <applianceSize>compact</applianceSize>\n\
-        <appliance>\n\
-            <resourcePoolId>{}</resourcePoolId>\n\
-            <datastoreId>{}</datastoreId>\n\
-        </appliance>\n\
-    </appliances>\n\
-    <vnics>\n\
-        <vnic>\n\
-            <index>0</index>\n\
-            <label>External</label>\n\
-            <type>uplink</type>\n\
-            <portgroupId>{}</portgroupId>\n\
-            <addressGroups>\n\
-                <addressGroup>\n\
-                    <primaryAddress>{}</primaryAddress>\n\
-                    <secondaryAddresses>\n\
-                        <ipAddress>{}</ipAddress>\n\
-                    </secondaryAddresses>\n\
-                    <subnetMask>255.255.255.0</subnetMask>\n\
-                </addressGroup>\n\
-            </addressGroups>\n\
-            <isConnected>true</isConnected>\n\
-        </vnic>\n\
-        <vnic>\n\
-            <index>1</index>\n\
-            <label>Transit</label>\n\
-            <type>internal</type>\n\
-            <portgroupId>{}</portgroupId>\n\
-            <addressGroups>\n\
-                <addressGroup>\n\
-                    <primaryAddress>{}</primaryAddress>\n\
-                    <subnetPrefixLength>29</subnetPrefixLength>\n\
-                </addressGroup>\n\
-            </addressGroups>\n\
-            <isConnected>true</isConnected>\n\
-        </vnic>\n\
-    </vnics>\n\
-    <cliSettings>\n\
-        <userName>admin</userName>\n\
-        <password>{}</password>\n\
-        <remoteAccess>false</remoteAccess>\n\
-    </cliSettings>\n\
-</edge>".format(self.datacenter_id,
-                self.esg_name,
-                self.esg_name,
-                self.cluster_id,
-                self.datastore_id,
-                self.vm_network_id,
-                self.esg_external_ip,
-                self.esg_secondary_ip,
-                transit_ls,
-                self.esg_transit_ip,
-                self.infra_password)
+        esg = dict()
+        esg['nsx'] = self
+        esg['transit_ls'] = self.get_logical_switch('Transit')
 
-        api_data = self.nsx_post_xml('/api/4.0/edges',
-                                     data)
-        return api_data
-
-    def get_edges(self):
-        return self.get_json_api_data('/api/4.0/edges')
-
-    def get_edge(self, name):
-        for edge in self.get_edges()['edgePage']['data']:
-            if edge['name'] == name:
-                return edge['objectId']
-
-    def get_edge_config(self, edge_id):
-        return self.get_json_api_data('/api/4.0/edges/{}'.format(edge_id))
-
-    def remove_config_versions(self, config):
-        # Removes the 'version' entries from an Edge's config to
-        # allow updating and sending it back
-        if not isinstance(config, (dict, list)):
-            return config
-        if isinstance(config, list):
-            return [self.remove_config_versions(v) for v in config]
-        return {k: self.remove_config_versions(v) for k, v in config.items()
-                if k not in {'version'}}
-
-    def config_edge_routing(self, edge_id):
-        esg = False
-        edge_config = self.get_edge_config(edge_id)
-
-        if edge_config['type'] == 'gatewayServices':
-            esg = True
-            router_id = self.esg_external_ip
-        elif edge_config['type'] == 'distributedRouter':
-            router_id = self.dlr_ctrl_ip
-
-        new_config = self.remove_config_versions(edge_config)
-
-        for index, feature in enumerate(new_config['featureConfigs']['features']):
-            if esg:
-                if feature['featureType'] == 'firewall_4.0':
-                    new_config['featureConfigs']['features'][index]['defaultPolicy']['action'] = "accept"
-
-            if feature['featureType'] == 'routing_4.0':
-                new_config['featureConfigs']['features'][index]['ospf']['enabled'] = "true"
-                new_config['featureConfigs']['features'][index]['ospf']['ospfAreas']['ospfAreas'][0]['areaId'] = self.internal_ospf_area
-                new_config['featureConfigs']['features'][index]['routingGlobalConfig']['routerId'] = router_id
-                
-                if esg:
-                    new_config['featureConfigs']['features'][index]['ospf']['ospfInterfaces']['ospfInterfaces'].append({
-                      "vnic": 0,
-                      "areaId": 0,
-                      "helloInterval": 10,
-                      "deadInterval": 40,
-                      "priority": 128,
-                      "cost": 1,
-                      "mtuIgnore": "false"
-                    })
-                    new_config['featureConfigs']['features'][index]['ospf']['ospfInterfaces']['ospfInterfaces'].append({
-                      "vnic": 1,
-                      "areaId": self.internal_ospf_area,
-                      "helloInterval": 10,
-                      "deadInterval": 40,
-                      "priority": 128,
-                      "cost": 1,
-                      "mtuIgnore": "false"
-                    })
-                else:
-                    new_config['featureConfigs']['features'][index]['ospf']['protocolAddress'] = self.dlr_ctrl_ip
-                    new_config['featureConfigs']['features'][index]['ospf']['forwardingAddress'] = self.dlr_fwd_ip
-                    new_config['featureConfigs']['features'][index]['ospf']['ospfInterfaces']['ospfInterfaces'].append({
-                      "vnic": 2,
-                      "areaId": self.internal_ospf_area,
-                      "helloInterval": 10,
-                      "deadInterval": 40,
-                      "priority": 128,
-                      "cost": 1,
-                      "mtuIgnore": "false"
-                    })
-
-        json_new_config = json.dumps(new_config)
-
-        print(self.nsx_send_json('/api/4.0/edges/{}'.format(edge_id),
-                                 json_new_config,
-                                 'PUT'))
-
-    def get_host_comm_status(self, host_id):
-        return self.get_json_api_data('/api/2.0/vdn/inventory/host/{}/connection/status'.format(host_id))
+        return self.nsx_send_json('/api/4.0/edges',
+                                  self.load_jinja_template('esg.json', esg))
 
 
 vc = Vcenter()
 nsx = Nsx(vc)
 
 print(nsx.get_nsx_info())
-nsx.deploy()
+print(nsx.deploy())
