@@ -29,7 +29,7 @@ class Nsx():
         self.nsx_pass = config['NSX']['PASSWORD']
         self.infra_password = config['NSX']['INFRA_PASSWORD']
 
-        self.num_controllers = config['NSX']['NUM_CONTROLLERS']
+        self.num_controllers = int(config['NSX']['NUM_CONTROLLERS'])
 
         self.web_lif_ip = config['NSX']['WEB_LS_LIF']
 
@@ -82,7 +82,8 @@ class Nsx():
         vtep_ip_pool_id = self.get_ip_pool_id_by_name('VTEP_POOL')
         controller_ip_pool_id = self.get_ip_pool_id_by_name('CONTROLLER_POOL')
 
-        print(self.configure_vxlan(vtep_ip_pool_id))
+        print(self.configure_vxlan(vtep_ip_pool_id).text)
+        print('Host prep component status:')
         sleep(10)
 
         status, hp, rabbit, fw = False, False, False, False
@@ -125,6 +126,7 @@ class Nsx():
             print('Created Transport Zone!')
         transport_zone_id = transport_zone.text
 
+        print('Controller deployment status:')
         for x in range(1, (self.num_controllers + 1)):
             controller_name = '{}0{}'.format(config['NSX']['CONTROLLER_PREFIX'], x)
 
@@ -136,20 +138,26 @@ class Nsx():
                 status = self.get_controller_job_status(controller)
                 print(status)
                 sleep(10)
-                # Checks if deploy is complete and prints the controller VM ID:
-                # Examples:
-                #    {'progress': 88, 'status': 'PushingFile'}
-                #    {'vmId': 'vm-696', 'status': 'WaitingForToolRunning'}
-                #    {'vmId': 'vm-696', 'status': 'Success'}
                 if status['status'] == 'Success':
                     print(status['vmId'])
+                    break
+
+            for controller in self.get_controllers()['controllers']:
+                if controller['name'] == controller_name:
+                    controller_id = controller['id']
+                    while True:
+                        controller_status = self.get_controller(controller_id)['status']
+                        print(controller_status)
+                        sleep(10)
+                        if controller_status == 'RUNNING':
+                            break
                     break
 
         # transport_zone_id = self.get_transport_zones()['allScopes'][0]['objectId']
         logical_switches = ['Transit', 'DLR-HA', 'Web-LS', 'App-LS', 'DB-LS']
 
         for ls in logical_switches:
-            if self.create_logical_switch('Transit', transport_zone_id).status_code == 201:
+            if self.create_logical_switch(ls, transport_zone_id).status_code == 201:
                 print('Created Logical Switch "%s"' % ls)
 
         print(self.deploy_dlr().text)
@@ -348,6 +356,12 @@ class Nsx():
 
     def get_controller_job_status(self, job_id):
         return self.get_json_api_data('/api/2.0/vdn/controller/progress/{}'.format(job_id))
+
+    def get_controllers(self):
+        return self.get_json_api_data('/api/2.0/vdn/controller')
+
+    def get_controller(self, controller_id):
+        return self.get_json_api_data('/api/2.0/vdn/controller/{}'.format(controller_id))
 
     def get_logical_switches(self):
         return self.get_json_api_data('/api/2.0/vdn/virtualwires')
